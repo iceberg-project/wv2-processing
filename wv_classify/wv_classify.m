@@ -12,92 +12,58 @@
 % Optionally smooths results through moving-window filter
 % Outputs images as GEOTIFF files with geospatial information.
 
+function dt_filt = WV_Processing(images,id,met,crd_sys,dt,filt,loc,idnumber,rrs_out,class_out);
 
-clear all
 tic
-
-%% Assign input and output locations
-loc = 'RB'; % Typically the estuary acronym
-coor_sys = 4326; % Change coordinate system code here
-Rrs_write = 0; % 1=write Rrs geotiff; 0=do not write
-d_t = 1; % 0=End after Rrs conversion; 1 = rrs, bathy, DT; 2 = rrs, bathy and DT
-filter = 3; % 0=None, 1=3x3, 3=7x7, 5=11x11
-% sgw = 0; % Sunglint moving-window box = sgw*2 +1 (i.e. 2 = 5x5 box)
-% sgwid = num2str(sgw)
-
-loc_in = '/home1/mmccarthy/Matt/USF/Other/NERRS_Mapping/Processing/Ortho/';
-met_in = '/home1/mmccarthy/Matt/USF/Other/NERRS_Mapping/Processing/Raw/';
-loc_out = '/home1/mmccarthy/Matt/USF/Other/NERRS_Mapping/Processing/Output/';
-matfiles = dir(fullfile('Matt','USF','Other','NERRS_Mapping','Processing','Ortho','*.tif'));
-matfiles2 = dir(fullfile('Matt','USF','Other','NERRS_Mapping','Processing','Raw','*.xml')); %% Revise this to find both all-caps and all lower-case extensions
-
-% loc_in = ['/home1/mmccarthy/Matt/USF/Other/Seagrass/test/'];
-% met_in = ['/home1/mmccarthy/Matt/USF/Other/Seagrass/test/'];
-% loc_out = ['/home1/mmccarthy/Matt/USF/Other/Seagrass/test/Rrs/'];
-% matfiles = dir(fullfile('Matt','USF','Other','Seagrass','test','*.tif'));
-% matfiles2 = dir(fullfile('Matt','USF','Other','Seagrass','test','*.xml'));
- 
-
-sz_files = size(matfiles(:,1),1)
+d_t = str2num(dt);
+n = num2str(idnumber);
+id
+met
+coor_sys = crd_sys; % Change coordinate system code here
+filter = str2num(filt);
+loc_out = rrs_out;
 
 % Assign constants for all images
-ebw = 0.001*[47.3 54.3 63.0 37.4 57.4 39.3 98.9 99.6]; % Effective Bandwidth per band (nm converted to um units; from IMD metadata files)
-irr = [1758.2229 1974.2416 1856.4104 1738.4791 1559.4555 1342.0695 1069.7302 861.2866]; % Band-averaged Solar Spectral Irradiance (W/m2/um units)
-cw = [.4273 .4779 .5462 .6078 .6588 .7237 .8313 .9080]; % Center wavelength (used for Rayleigh correction; from Radiometric Use of WorldView-2 Imagery)
+ebw1 = 0.001*[47.3 54.3 63.0 37.4 57.4 39.3 98.9 99.6]; % Effective Bandwidth per WV2 band (nm converted to um units; from IMD metadata files)
+ebw2 = 0.001*[40.5 54.0 61.8 38.1 58.5 38.7 100.4 88.9]; % WV3
+irr1 = [1758.2229 1974.2416 1856.4104 1738.4791 1559.4555 1342.0695 1069.7302 861.2866]; % Band-averaged Solar Spectral Irradiance (W/m2/um units)
+irr2 = [1757.89 2004.61 1830.18 1712.07 1535.33 1348.08 1055.94 858.77]; % WV3 (from Radiometric Use of WorldView-3 Imagery, Thuiller 2003 column Table 3)
+cw1 = [.4273 .4779 .5462 .6078 .6588 .7237 .8313 .9080]; % Center wavelength (used for Rayleigh correction; from Radiometric Use of WorldView-2 Imagery)
+cw2 = [.4274 .4819 .5471 .6043 .6601 .7227 .8240 .9136]; % WV3
 gamma = 0.01*[1.499 1.471 1.442 1.413 1.413 1.413 1.384 1.384]; % Factor used in Rayleigh Phase Function equation (Bucholtz 1995)
 
-for z = 1;%:sz_files;
-id = matfiles(z,1).name(1:19)
-
-X = [loc_in, matfiles(z,1).name]; % Change location of MS Tiff images here
-Z = [met_in, matfiles2(z,1).name]; % Change location of XML files here
-
-    [A, R] = geotiffread(X);
+    [A, R] = geotiffread(images);
     szA = size(A);
-     s = xml2struct(Z);
+     s = xml2struct(met);
 %    save XMLtest.mat s
         % Extract calibration factors and acquisition time from metadata for each band
         if isfield(s,'IMD') == 1
-            c = struct2cell(s.Children(2).Children(:));
-        	idx{1} = strfind(c(1,:),'NUMROWS');
-            idx{2} = strfind(c(1,:),'NUMCOLUMNS');
-            idx{3} = strfind(c(1,:),'BAND_C');
-            idx{4} = strfind(c(1,:),'BAND_B');
-    		idx{5} = strfind(c(1,:),'BAND_G');
-    		idx{6} = strfind(c(1,:),'BAND_Y');
-    		idx{7} = strfind(c(1,:),'BAND_R');
-    		idx{8} = strfind(c(1,:),'BAND_RE');
-    		idx{9} = strfind(c(1,:),'BAND_N');
-    		idx{10} = strfind(c(1,:),'BAND_N2');
-            idx{11} = strfind(c(1,:),'IMAGE');
-            for i = 1:11;
-                idxb(i,1:2) = find(not(cellfun('isempty',idx{i})));
-            end
-            szB(1) = str2num(s.Children(2).Children(idxb(1)).Children.Data);
-    		szB(2) = str2num(s.Children(2).Children(idxb(2)).Children.Data);
-	        kf(1,1) = str2num(s.Children(2).Children(idxb(3)).Children(26).Children.Data);
-	        kf(2,1) = str2num(s.Children(2).Children(idxb(4)).Children(26).Children.Data);
-	        kf(3,1) = str2num(s.Children(2).Children(idxb(5)).Children(26).Children.Data);
-	        kf(4,1) = str2num(s.Children(2).Children(idxb(6)).Children(26).Children.Data);
-	        kf(5,1) = str2num(s.Children(2).Children(idxb(7,1)).Children(26).Children.Data);
-	        kf(6,1) = str2num(s.Children(2).Children(idxb(8)).Children(26).Children.Data);
-	        kf(7,1) = str2num(s.Children(2).Children(idxb(9,1)).Children(26).Children.Data);
-	        kf(8,1) = str2num(s.Children(2).Children(idxb(10)).Children(26).Children.Data);
-	        aqyear = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(1:4));
-	        aqmonth = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(6:7));
-	        aqday = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(9:10));
-	        aqhour = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(12:13));
-	        aqminute = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(15:16));
-	        aqsecond = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(18:26));
-	        sunel = str2num(s.Children(2).Children(idxb(11,2)).Children(56).Children.Data);
-	        sunaz = str2num(s.Children(2).Children(idxb(11,2)).Children(50).Children.Data);
-	        satview = str2num(s.Children(2).Children(idxb(11,2)).Children(86).Children.Data);
-	        sensaz = str2num(s.Children(2).Children(idxb(11,2)).Children(62).Children.Data);
-	        satel = str2num(s.Children(2).Children(idxb(11,2)).Children(68).Children.Data);
-            cl_cov = str2num(s.Children(2).Children(idxb(11,2)).Children(90).Children.Data);
-        else
-             szB(1) = str2num(s.isd.IMD.NUMROWS.Text);
-             szB(2) = str2num(s.isd.IMD.NUMCOLUMNS.Text);
+             szB(1) = str2num(s.IMD.SOURCE_IMD.IMD.NUMROWS.Text); %#ok<*ST2NM>
+             szB(2) = str2num(s.IMD.SOURCE_IMD.IMD.NUMCOLUMNS.Text);
+        	 kf(1,1) = str2num(s.IMD.SOURCE_IMD.IMD.BAND_C.ABSCALFACTOR.Text);
+   	         kf(2,1) = str2num(s.IMD.SOURCE_IMD.IMD.BAND_B.ABSCALFACTOR.Text);
+	         kf(3,1) = str2num(s.IMD.SOURCE_IMD.IMD.BAND_G.ABSCALFACTOR.Text);
+	         kf(4,1) = str2num(s.IMD.SOURCE_IMD.IMD.BAND_Y.ABSCALFACTOR.Text);
+	         kf(5,1) = str2num(s.IMD.SOURCE_IMD.IMD.BAND_R.ABSCALFACTOR.Text);
+	         kf(6,1) = str2num(s.IMD.SOURCE_IMD.IMD.BAND_RE.ABSCALFACTOR.Text);
+	         kf(7,1) = str2num(s.IMD.SOURCE_IMD.IMD.BAND_N.ABSCALFACTOR.Text);
+	         kf(8,1) = str2num(s.IMD.SOURCE_IMD.IMD.BAND_N2.ABSCALFACTOR.Text);
+	         aqyear = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.FIRSTLINETIME.Text(12:15)); % Extract Acquisition Time from metadata
+	         aqmonth = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.FIRSTLINETIME.Text(17:18)); % Extract Acquisition Time from metadata
+    	   	 aqday = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.FIRSTLINETIME.Text(20:21)); % Extract Acquisition Time from metadata
+           	 aqhour = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.FIRSTLINETIME.Text(23:24)); % Extract Acquisition Time from metadata
+             aqminute = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.FIRSTLINETIME.Text(26:27)); % Extract Acquisition Time from metadata
+	    	 aqsecond = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.FIRSTLINETIME.Text(29:37)); % Extract Acquisition Time from metadata
+	    	 sunel = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.MEANSUNEL.Text); % Extract Mean Sun Elevation angle from metadata
+             satview = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.MEANOFFNADIRVIEWANGLE.Text); % Extract Mean Off Nadir View angle from metadata
+	         sunaz = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.MEANSUNAZ.Text);
+             sensaz = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.MEANSATAZ.Text);
+             satel = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.MEANSATEL.Text);
+             cl_cov = str2num(s.IMD.SOURCE_IMD.IMD.IMAGE.CLOUDCOVER.Text);
+
+	elseif isfield(s,'isd') == 1
+		 szB(1) = str2num(s.isd.IMD.NUMROWS.Text);
+                 szB(2) = str2num(s.isd.IMD.NUMCOLUMNS.Text);
         	 kf(1,1) = str2num(s.isd.IMD.BAND_C.ABSCALFACTOR.Text);
    	         kf(2,1) = str2num(s.isd.IMD.BAND_B.ABSCALFACTOR.Text);
 	         kf(3,1) = str2num(s.isd.IMD.BAND_G.ABSCALFACTOR.Text);
@@ -118,11 +84,63 @@ Z = [met_in, matfiles2(z,1).name]; % Change location of XML files here
              sensaz = str2num(s.isd.IMD.IMAGE.MEANSATAZ.Text);
              satel = str2num(s.isd.IMD.IMAGE.MEANSATEL.Text);
              cl_cov = str2num(s.isd.IMD.IMAGE.CLOUDCOVER.Text);
+	else
+            c = struct2cell(s.Children(2).Children(:));
+	    idx{1} = strfind(c(1,:),'NUMROWS');
+            idx{2} = strfind(c(1,:),'NUMCOLUMNS');
+            idx{3} = strfind(c(1,:),'BAND_C');
+            idx{4} = strfind(c(1,:),'BAND_B');
+    	    idx{5} = strfind(c(1,:),'BAND_G');
+    	    idx{6} = strfind(c(1,:),'BAND_Y');
+    	    idx{7} = strfind(c(1,:),'BAND_R');
+    	    idx{8} = strfind(c(1,:),'BAND_RE');
+    	    idx{9} = strfind(c(1,:),'BAND_N');
+    	    idx{10} = strfind(c(1,:),'BAND_N2');
+            idx{11} = strfind(c(1,:),'IMAGE');
+            for i = 1:11;
+                idxb(i,1:2) = find(not(cellfun('isempty',idx{i})));
+            end
+            szB(1) = str2num(s.Children(2).Children(idxb(1)).Children.Data);
+    	    szB(2) = str2num(s.Children(2).Children(idxb(2)).Children.Data);
+	    kf(1,1) = str2num(s.Children(2).Children(idxb(3)).Children(26).Children.Data);
+	    kf(2,1) = str2num(s.Children(2).Children(idxb(4)).Children(26).Children.Data);
+	    kf(3,1) = str2num(s.Children(2).Children(idxb(5)).Children(26).Children.Data);
+	    kf(4,1) = str2num(s.Children(2).Children(idxb(6)).Children(26).Children.Data);
+	    kf(5,1) = str2num(s.Children(2).Children(idxb(7,1)).Children(26).Children.Data);
+	    kf(6,1) = str2num(s.Children(2).Children(idxb(8)).Children(26).Children.Data);
+	    kf(7,1) = str2num(s.Children(2).Children(idxb(9,1)).Children(26).Children.Data);
+	    kf(8,1) = str2num(s.Children(2).Children(idxb(10)).Children(26).Children.Data);
+	    aqyear = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(1:4));
+	    aqmonth = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(6:7));
+	    aqday = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(9:10));
+	    aqhour = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(12:13));
+	    aqminute = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(15:16));
+	    aqsecond = str2num(s.Children(2).Children(idxb(11,2)).Children(16).Children.Data(18:26));
+	    sunel = str2num(s.Children(2).Children(idxb(11,2)).Children(56).Children.Data);
+	    sunaz = str2num(s.Children(2).Children(idxb(11,2)).Children(50).Children.Data);
+	    satview = str2num(s.Children(2).Children(idxb(11,2)).Children(86).Children.Data);
+	    sensaz = str2num(s.Children(2).Children(idxb(11,2)).Children(62).Children.Data);
+	    satel = str2num(s.Children(2).Children(idxb(11,2)).Children(68).Children.Data);
+            cl_cov = str2num(s.Children(2).Children(idxb(11,2)).Children(90).Children.Data);
         end
         
         szB(3) = 8;
 
-       
+       % Assign WV2 vs WV3 constant calibration factors
+	if id(4) == '3'
+       		 ebw = ebw2;
+       		 irr = irr2;
+	         cw = cw2;
+	else ebw = ebw1;
+	         irr = irr1;
+        	 cw = cw1;
+	end
+
+	% Identify growing season vs senesced
+	if aqmonth == 11 || aqmonth == 12 || aqmonth == 1 || aqmonth == 2
+		season = 0;
+	else season = 1;
+	end
 	    %% Calculate Earth-Sun distance and relevant geometry
 	    if aqmonth == 1 || aqmonth == 2;
 	        year = aqyear -1;
@@ -153,7 +171,7 @@ Z = [met_in, matfiles2(z,1).name]; % Change location of XML files here
 	    az = abs(sensaz - 180 - sunaz); % Relative azimuth angle
 	    thetaplus = acosd(cosd(90-sunel)*cosd(90-satel) - sind(90-sunel)*sind(90-satel)*cosd(az)); % Scattering angles
 
-        for d = 1:8
+        for d = 1:8;
             Pr(d) = (3/(4*(1+2*gamma(d))))*((1+3*gamma(d))+(1-gamma(d))*cosd(thetaplus)^2); % Rayleigh scattering phase function (described in Bucholtz 1995)
         end
         
@@ -167,7 +185,7 @@ Z = [met_in, matfiles2(z,1).name]; % Change location of XML files here
 	    end
 
 	    % rrs constant calculation (Kerr et al. 2018 and Mobley 1994)
-	    G = single(1.56); % constant (Kerr eq. 3)
+	G = single(1.7); % constant Li et al. 2019
         na = 1.00029; % Refractive index of air
         nw = 1.34; % Refractive index seawater
         inc_ang2 = real(asind(sind(90-satel)*nw/na)); % Incident angle for water-air from Snell's Law
@@ -199,67 +217,58 @@ Z = [met_in, matfiles2(z,1).name]; % Change location of XML files here
             clear A
 
             %% Output reflectance image
-            if Rrs_write == 1;
-                Z = [loc_out,id,'_',loc,'_Rrs']
-                geotiffwrite(Z,Rrs,R(1,1),'CoordRefSysCode',coor_sys);
-            end
+%            if Rrs_write == 1;
+%		if id(4) == '3'
+%			info = geotiffinfo(images);
+%			geoTags = info.GeoTIFFTags.GeoKeyDirectoryTag;
+%			tiffTags = struct('TileLength',1024,'TileWidth',1024);
+%			Z = [loc_out,id,'_',loc,'_RrsBT']
+%			geotiffwrite(Z,Rrs,R(1,1),'GeoKeyDirectoryTag',geoTags,'TiffType','bigtiff','TiffTags',tiffTags);
+%		else
+%	                Z = [loc_out,id,'_',loc,'_Rrs']
+%	                geotiffwrite(Z,Rrs,R(1,1),'CoordRefSysCode',coor_sys);
+%		end
+%            end
 
 	if d_t > 0; % Run DT and/or rrs conversion; otherwise end
-        
-	    % Calculate Kd (water column attenuation coefficient) from Chuanmin Hu's Rrs_Kd_Model.xlsx sheet
-% 		sunzen = 90.0-sunel;
-% 		c1 = 0.005; % c1-4 hard-coded, but v1 and v2 change with modified values of aph(440), adg(440),bbp(440), Sdg, Y
-% 		c2 = 4.18;
-% 		c3 = 0.52;
-% 		c4 = 10.8;
-% 	 	v2 = [0.023277868 0.020883561 0.018975346 0.017605058 0.016771098 0.015875283 0.072734281 0.068046578]; % bb (backscatter)
-%        v1 = [0.22024 0.142972 0.099157 0.286342 0.443809 1.491289 2.276262 2.223947]; % at (total absorption) DEFAULT CHL (0.1 0.1 0.01 0.015 0.5)
-%         v1 = [0.069177389 0.041529229 0.061338823 0.268134177 0.411563873 1.489684614 2.275464564 2.22325881]; % Belize test
-%         v2 = [0.023277868 0.020883561 0.018975346 0.017605058 0.016771098 0.015875283 0.049505144 0.046268752];
-%        v1 = [0.006921 0.013933 0.051193 0.264353 0.409819 1.489006 2.275336 2.223238]; % at (total absorption) LOWER CHL
-%        v2 = [0.023277868 0.020883561 0.018975346 0.017605058 0.016771098 0.015875283 0.000869138 0.00067143]; % bb (backscatter)
-% 
-% 		for b = 1:8
-% 			Kd(b) = single((1+c1*sunzen)*v1(b)+c2*(1-c3*exp(-c4*v1(b)))*v2(b));
-% 		end
-	
-%         Kd = [0.036 0.037 0.075 0.32 0.484 1.416];
 
-
-	    %% Setup for Deglint, Bathymetry, and Decision Tree
-	    b = 1;
+	%% Setup for Deglint, Bathymetry, and Decision Tree
+	b = 1;
         t = 1;
 	    u = 1;
         y = 0;
 	    v = 0;
 	    num_pix = 0;
+	    sum_SD(b) = 0;
 	    sum_veg(t) = 0;
+	    sum_veg2(t) = 0;
 	    dead_veg(t) = 0;
+	    sum_water_rrs(u) = 0;
 	    sz_ar = sz(1)*sz(2);
 	    water = zeros(sz_ar,9);
-	    for j = 1:sz(1)
-	        for k = 1:sz(2)
+	    for j = 1:sz(1);
+	        for k = 1:sz(2);
 	            if isnan(Rrs(j,k,1)) == 0
                     num_pix = num_pix +1; % Count number of non-NaN pixels
                     c_val(num_pix) = Rrs(j,k,1); % Record coastal band value for use in cloud mask prediction
                     if (Rrs(j,k,7) - Rrs(j,k,2))/(Rrs(j,k,7) + Rrs(j,k,2)) < 0.65 && Rrs(j,k,5) > Rrs(j,k,4) && Rrs(j,k,4) > Rrs(j,k,3) % Sand & Developed
                         sum_SD(b) = sum(Rrs(j,k,6:8));
                         b = b+1;
-                    elseif (Rrs(j,k,8) - Rrs(j,k,5))/(Rrs(j,k,8) + Rrs(j,k,5)) > 0.6 && Rrs(j,k,7) > Rrs(j,k,3); % Identify vegetation (excluding grass)
+                    elseif (Rrs(j,k,8) - Rrs(j,k,5))/(Rrs(j,k,8) + Rrs(j,k,5)) > 0.65 && Rrs(j,k,7) > Rrs(j,k,3); % Identify vegetation (excluding grass)
                         if ((Rrs(j,k,7) - Rrs(j,k,2))/(Rrs(j,k,7) + Rrs(j,k,2))) > 0.20; % Shadow filter
-	                        sum_veg(t) = sum(Rrs(j,k,3:5)); % Sum bands 3-5 for selected veg to distinguish wetland from upland
-                            sum_veg2(t) = sum(Rrs(j,k,7:8));
+	                    sum_veg(t) = sum(Rrs(j,k,3:5)); % Sum bands 3-5 for selected veg to distinguish wetland from upland
+			    sum_veg2(t) = sum(Rrs(j,k,7:8));
                             dead_veg(t) = (((Rrs(j,k,7) - Rrs(j,k,4))/3) + Rrs(j,k,4)) - Rrs(j,k,5); % Compute difference of predicted B5 value from actual valute
 	                        t = t+1;
                         end
-        			elseif Rrs(j,k,8) < 0.11 && Rrs(j,k,1) > 0 && Rrs(j,k,2) > 0 && Rrs(j,k,3) > 0 && Rrs(j,k,4) > 0 && Rrs(j,k,5) > 0 && Rrs(j,k,6) > 0 && Rrs(j,k,7) > 0 && Rrs(j,k,8) > 0; % Identify glint-free water
+ 		    elseif Rrs(j,k,8) < 0.11 && Rrs(j,k,1) > 0 && Rrs(j,k,2) > 0 && Rrs(j,k,3) > 0 && Rrs(j,k,4) > 0 && Rrs(j,k,5) > 0 && Rrs(j,k,6) > 0 && Rrs(j,k,7) > 0 && Rrs(j,k,8) > 0; % Identify glint-free water
                         water(u,1:8) = double(Rrs(j,k,:));
-                        water_rrs(1:6) = Rrs(j,k,1:6)./(zeta + G.*Rrs(j,k,1:6));
-                        if water_rrs(4) > water_rrs(2) && water_rrs(4) < 0.12 && water_rrs(5) < water_rrs(3)
-                                sum_water_rrs(u) = sum(water_rrs(3:5));
-                        end
+			water_rrs(1:6) = Rrs(j,k,1:6)./(zeta + G.*Rrs(j,k,1:6));
+			if water_rrs(4) > water_rrs(2) && water_rrs(4) < 0.12 && water_rrs(5) < water_rrs(3)
+				sum_water_rrs(u) = sum(water_rrs(3:5));
+			end
                         u = u+1;
-        				if Rrs(j,k,8)<Rrs(j,k,7) && Rrs(j,k,6)<Rrs(j,k,7) && Rrs(j,k,6)<Rrs(j,k,5) && Rrs(j,k,4)<Rrs(j,k,5) && Rrs(j,k,4)<Rrs(j,k,3)% NDGI to identify glinted water pixels (some confusion w/ clouds)
+        		if Rrs(j,k,8)<Rrs(j,k,7) && Rrs(j,k,6)<Rrs(j,k,7) && Rrs(j,k,6)<Rrs(j,k,5) && Rrs(j,k,4)<Rrs(j,k,5) && Rrs(j,k,4)<Rrs(j,k,3)% NDGI to identify glinted water pixels (some confusion w/ clouds)
                             v = v+1;
                             water(u,9) = 2; % Mark array2<array1 glinted pixels
                         elseif Rrs(j,k,8)>Rrs(j,k,7) && Rrs(j,k,6)>Rrs(j,k,7) && Rrs(j,k,6)>Rrs(j,k,5) && Rrs(j,k,4)>Rrs(j,k,5) && Rrs(j,k,4)>Rrs(j,k,3)
@@ -297,14 +306,42 @@ Z = [met_in, matfiles2(z,1).name]; % Change location of XML files here
         mnNIR2 = min(water8(water8>0)); % Positive minimum Band 8 value used for deglinting
         
         idx_gf = find(water(:,9)==1); % Glint-free water
+	water_gf = water(idx_gf,1:8);
+
+% Identify optically deep water average spectrum
+        bn = 7; % Band number
+        pctl_l = 5; % Percentile (5th percentile value of glint-free water n-band values chosen based on visual analysis of density slicing of Rrs image)
+        pctl_u = 15;
+        clear water_gfidx water_odw m0 m1
+        water_gfidx = find(water_gf(:,bn) == prctile(water_gf(:,bn),pctl_l) & water_gf(:,bn) <= prctile(water_gf(:,bn),pctl_u));
+        water_odw(:,1:8) = (water_gf(water_gfidx(1:end),1:8)); % Li et al. Dove BGR corresponds to WV2 BGY center wavelengths
+
+%         Equations from Li et al. 2019 & Hu et al. 2012
+        for h = 1:size(water_odw,1)
+%             w1(h) = water_odw(h,3) - (water_odw(h,1) + (546-427)/(659-427)*(water_odw(h,5) - water_odw(h,1))); % Hu et al. 2012
+            w2(h) = water_odw(h,3) - 0.46*water_odw(h,4) - 0.54*water_odw(h,1); % Li et al. 2019
+        end
+
+	if exist('w2')==1 
+	        w = median(w2(w2<0));
+	else w = 0;
+	end
+
+        if w > -0.0005
+            m0 = 0;
+            m1 = 0;
+            Update = 'Too Turbid for Benthic Mapping'
+        else
+            chla = 10^(-0.4909 + 191.659*w) % Hu et al. 2012 (Kerr limited chla to 1.0mg/m3; 0.1 mg/m3 WV Cay Sal most accurate value used)
+            m0 = 52.083*exp(2.711*chla) % Revised from Li et al. 2019 with exponential scalar derived from Kerr FK WV image field data tuning parameters
+            m1 = 50.156*exp(2.711*chla) % TARGET: 64.3 +/- 0.5 & 62.6 +/- 0.5, Predicted: 67.2 & 64.7
+        end
+
+	Kd = [0.036 0.037 0.075 0.25 0.415]; %1.416]; %(Based on Kerr 2018 Fig 7a chl-conc 0.1 mg/m3 i.e. lowest RMSE water-depth predictor values)
 
 		if v > 0.25*u
 			Update = 'Deglinting'
-            id2 = 'deglinted';
-%             idx_w1 = find(water(:,9)==2); % Glinted water array1>array2
-%             idx_w2 = find(water(:,9)==3); % Glinted water array2>array1
-%             water1 = [water(idx_gf,1:8);water(idx_w1,1:8)];
-%             water2 = [water(idx_gf,1:8);water(idx_w2,1:8)];
+            		id2 = 'deglinted';
                 	for b = 1:6 %% Calculate linear fitting of all MS bands vs NIR1 & NIR2 for deglinting in DT (Hedley et al. 2005)
                         	if b == 1 || b == 4 || b == 6
                                 slope1 = water(:,b)\water(:,8);
@@ -317,52 +354,103 @@ Z = [met_in, matfiles2(z,1).name]; % Change location of XML files here
             id2 = 'glintfree';
         end
         
-        %% Edge Detection
-       img_sub = Rrs(:,:,5);
-       BWbin = imbinarize(img_sub);
-       BW = imtophat(BWbin,strel('square',10));
-%        BW1 = edge(BWtop,'canny');
-%        seDil = strel('square',1);
-%        BWdil = imdilate(BW1,seDil);
-%        BW = imfill(BWdil,'holes');
-%        
-%        seDer = strel('',[5 5]);
-%        BWer = imerode(BW,seDer);
+        %% Edge Detection via Morphological Index (improved over Huang & Zhang 2011, Ma et al. 2019)
+       waterind = uint16((Rrs(:,:,3)-Rrs(:,:,8))./(Rrs(:,:,3)+Rrs(:,:,8)) > 0.15);
+       img_sub2 = Rrs(:,:,2);
+       img_sub5 = Rrs(:,:,5);
+       img_sub7 = Rrs(:,:,7);
 
-       
-%         %% Depth scaling
-%         water10(:,1:2) = water(idx_gf,2:3);
-%         water10(:,1:2) = water10(:,1:2)./(zeta + G.*water10(:,1:2));
-%         waterdp = real(log(1000*(water10(:,1)))./log(1000*(water10(:,2))));
-%         water_dp = waterdp(waterdp>0 & waterdp<2);
-%         [N,X] = hist(water_dp);
-%         med_dp = median(water_dp)
-%         low = X(2); %avg_dp - 5*std(water_dp) %min(water_dp)
-%         scale_dp = scale/(med_dp-low)
-% 
-%         clear water10
-        %         std_dp = std(water_dp)
-%         low = avg_dp - 2*std_dp % Assumed represents 0 depth or min depth
-%         high = avg_dp + std_dp;
+       Rrs_cloud = img_sub2./img_sub7;
+       Rrs_cl2 = Rrs_cloud;
+       Rrs_cl3 = Rrs_cloud;
+       Rrs_cl2(Rrs_cloud >= 0.7) = 1;
+       Rrs_cl2(Rrs_cloud < 0.7) = 0;
+       Rrs_cl3(Rrs_cloud <= 0.9) = 1;
+       Rrs_cl3(Rrs_cloud > 0.9) = 0;
+       Rrs_clf = Rrs_cl2 + Rrs_cl3;
+       Rrs_clf(Rrs_clf < 2) = 0;
+       CLrrs = imbinarize(Rrs_clf);
+       CL1 = uint16(imtophat(CLrrs,strel('disk',100))) - waterind;
+       CL1(CL1<0) = 0;
+       CLe = imerode(CL1,strel('disk',20));
+       CLed = imdilate(CLe,strel('disk',150));
+       Cloud = imfill(CLed,'holes');
+	clear Rrs_cl2 Rrs_cl3 Rrs_clf CLrrs CL1 CLe CLed
+
+	Rrs_sh1 = Rrs_cloud;
+	Rrs_sh2 = Rrs_cloud;
+	Rrs_sh1(Rrs_cloud >= 1.3) = 1;
+	Rrs_sh1(Rrs_cloud < 1.3) = 0;
+	Rrs_sh2(Rrs_cloud <= 1.7) = 1;
+	Rrs_sh2(Rrs_cloud > 1.7) = 0;
+	Rrs_shf = Rrs_sh1 + Rrs_sh2;
+	Rrs_shf(Rrs_shf < 2) = 0;
+	SHrrs = imbinarize(Rrs_shf);
+	Shadow = uint16(imtophat(SHrrs,strel('square',20)));
+	clear Rrs_sh1 Rrs_sh2 Rrs_shf SHrrs
+
+        Rrs_map = img_sub5./img_sub7;
+	Rrs_map2 = Rrs_map;
+	Rrs_map3 = Rrs_map;
+	Rrs_map2(Rrs_map >= 0.7) = 1;
+	Rrs_map2(Rrs_map < 0.7) = 0;
+	Rrs_map3(Rrs_map <= 1.1) = 1;
+	Rrs_map3(Rrs_map > 1.1) = 0;
+	Rrs_mapf = Rrs_map2 + Rrs_map3;
+	Rrs_mapf(Rrs_mapf < 2) = 0;
+        BWrrs = imbinarize(Rrs_mapf);
+
+        BW1 = uint16(imtophat(BWrrs,strel('square',30))) - waterind;
+	BW1 = imdilate(BW1,strel('square',5)); % Expand developed to include shadows
+	BW1(BW1<0) = 0;
+
+        Cloud = Cloud - BW1;
+        Cloud(Cloud<0) = 0;
+        cld_idx = 0;
+        if size(find(Cloud ==1),1) > 0.060*szA(1)*szA(2)
+                cld_idx = 1;
+        end
+
+
+%	ns = 2000;
+%	BW = uint16(imtophat(BWrrs,strel('square',ns)));
+%	CC = bwconncomp(BW);
+%	numPixels = cellfun(@numel,CC.PixelIdxList);
+%	BW1idx = find(numPixels > 1000);
+%	CC.PixelIdxList = CC.PixelIdxList(BW1idx);
+%	CC.NumObjects = size(BW1idx,2);
+%	BW3 = uint16(labelmatrix(CC));
+%	BW3(BW3>0) = 1;
+%	BW3e = uint16(imerode(BW3,strel('disk',100)));
+%	BW3ed = uint16(imdilate(BW3e,strel('square',200)));
+%	BW4 = imfill(BW3ed,'holes');
+
+	BAI = (img_sub2 - img_sub7)./(img_sub2 + img_sub7); % Built Area Index
+	BAI = BAI * -1; % Dev & soil negative, soil more negative (water high positive)
+	BAI = imbinarize(BAI);
+	BAI = imerode(BAI,strel('square',5));
+
+	clear BW3 BW3e BW3ed BW2 BWrrs BWnew BWnewe BW1idx
+
+	Ztest = [loc_out,id,'_',loc,'_BW1']
+        geotiffwrite(Ztest,BW1,R(1,1),'CoordRefSysCode',coor_sys);
+        Ztest = [loc_out,id,'_',loc,'_BAI']
+        geotiffwrite(Ztest,BAI,R(1,1),'CoordRefSysCode',coor_sys);
+
+
 
         %% Determine Rrs-infinite from glint-free water pixels
-%         water_gf = water(idx_gf,1:8);
-%         dp_max_sort = sortrows(water_gf,8,'ascend'); % Sort all values in water by NIR2 column (assumes deepest water is darkest is NIR2)
-%         idx_dp = round(size(dp_max_sort,1)*0.001); % Use "deepest" 0.1% pixels
-%         dp_pct = dp_max_sort(1:idx_dp,:);
-%         dp_rrs = dp_pct(:,1:8)./(zeta + G.*dp_pct(:,1:8)); % Convert to subsurface rrs
-%         rrs_inf = min(dp_rrs(:,1:8)); %median(dp_rrs(:,1:8)) - 2*std(dp_rrs(:,1:8)); % Mean and Median values too high
-% %         rrs_inf = [0.00512 0.00686 0.008898 0.002553 0.001506 0.000403]; % Derived from Rrs_Kd_Model.xlsx for Default values
-% %         plot(rrs_inf)
+        rrs_inf = [0.00512 0.00686 0.008898 0.002553 0.001506 0.000403]; % Derived from Rrs_Kd_Model.xlsx for Default values
+
         %% Calculate target class metrics
         avg_SD_sum = mean(sum_SD(:));
         stdev_SD_sum = std(sum_SD(:));
-	    avg_veg_sum = mean(sum_veg(:));
-	    avg_dead_veg = mean(dead_veg(:));
-        avg_mang_sum = mean(sum_veg2(:));
-        idx_water2 = find(sum_water_rrs==0);
-        sum_water_rrs(idx_water2) = [];
-        avg_water_sum = mean(sum_water_rrs(:));
+	avg_veg_sum = mean(sum_veg(:))
+	avg_dead_veg = mean(dead_veg(:));
+	avg_mang_sum = mean(sum_veg2(:));
+	idx_water2 = find(sum_water_rrs==0);
+	sum_water_rrs(idx_water2) = [];
+	avg_water_sum = mean(sum_water_rrs(:));
 
 	    if cl_cov > 0
 		    num_cld_pix = round(num_pix*cl_cov*0.01); % Number of cloud pixels (rounded down to nearest integer) based on metadata-reported percent cloud cover
@@ -377,100 +465,133 @@ Z = [met_in, matfiles2(z,1).name]; % Change location of XML files here
 	    Rrs_0 = single(zeros(5,1)); %Preallocation for water-column corrected Rrs
  	    map = zeros(szA(1),szA(2),'uint8'); % Create empty matrix for classification output
 
-	if d_t == 1; % Execute Deglinting rrs and Bathymetry
-        if v > u*0.25
-            % Deglint equation
-            Rrs_deglint(1,1) = (Rrs(j,k,1) - (E_glint(1)*(Rrs(j,k,8) - mnNIR2)));
-            Rrs_deglint(2,1) = (Rrs(j,k,2) - (E_glint(2)*(Rrs(j,k,7) - mnNIR1)));
-            Rrs_deglint(3,1) = (Rrs(j,k,3) - (E_glint(3)*(Rrs(j,k,7) - mnNIR1)));
-            Rrs_deglint(4,1) = (Rrs(j,k,4) - (E_glint(4)*(Rrs(j,k,8) - mnNIR2)));
-            Rrs_deglint(5,1) = (Rrs(j,k,5) - (E_glint(5)*(Rrs(j,k,7) - mnNIR1)));
-            Rrs_deglint(6,1) = (Rrs(j,k,6) - (E_glint(6)*(Rrs(j,k,8) - mnNIR2)));
-            
-            % Convert above-surface Rrs to below-surface rrs (Kerr et al. 2018)
-            Rrs(j,k,1:6) = Rrs_deglint(1:6)./(zeta + G.*Rrs_deglint(1:6)); % Was Rrs_0=
+	if d_t == 1; % Execute Deglinting, rrs, Bathymetry
+            if v > u*0.25
+            for j = 1:szA(1)
+                for k = 1:szA(2)
+                    if isnan(Rrs(j,k,1)) == 0 && Rrs(j,k,8)<0.2
+                        % Deglint equation
+                        Rrs_deglint(1,1) = (Rrs(j,k,1) - (E_glint(1)*(Rrs(j,k,8) - mnNIR2)));
+                        Rrs_deglint(2,1) = (Rrs(j,k,2) - (E_glint(2)*(Rrs(j,k,7) - mnNIR1)));
+                        Rrs_deglint(3,1) = (Rrs(j,k,3) - (E_glint(3)*(Rrs(j,k,7) - mnNIR1)));
+                        Rrs_deglint(4,1) = (Rrs(j,k,4) - (E_glint(4)*(Rrs(j,k,8) - mnNIR2)));
+                        Rrs_deglint(5,1) = (Rrs(j,k,5) - (E_glint(5)*(Rrs(j,k,7) - mnNIR1)));
+                        Rrs_deglint(6,1) = (Rrs(j,k,6) - (E_glint(6)*(Rrs(j,k,8) - mnNIR2)));
 
-            % Relative depth estimate
-            dp = real(log(1000*Rrs_0(2))/log(1000*Rrs_0(3))); % Calculate relative depth (Stumpf 2003 ratio transform scaled to 1-10)
-            if dp > 0 && dp < 2
-                Bathy(j,k) = dp;
-            else dp = 0;
+                        % Convert above-surface Rrs to below-surface rrs (Kerr et al. 2018)
+                        Rrs_0(1:5) = Rrs_deglint(j,k,1:5)./(zeta + G.*Rrs_deglint(j,k,1:5)); % Convert above-surface Rrs to subsurface rrs (Kerr et al. 2018, Lee et al. 1998)
+                        b1 = 63.6; % Turning parameters (Kerr 2018)
+                        b0 = -60.25;
+                        dp = b1*real(log(1000*Rrs_0(2))/log(1000*Rrs_0(3))) + b0; % Calculate depth (Stumpf 2003 ratio transform with Kerr et al. 2018 coefficients)
+                        if dp < 15 && dp > 0 % Parameters based on Kerr 2018 RMSE-based recommended constraints (depths greater than 15m inaccurate)
+                            Bathy(j,k) = dp;
+                        end
+                        for d = 1:5
+                            Rrs(j,k,d) = real(((Rrs_0(d)-rrs_inf(d))/exp(-2*Kd(1,d)*dp))+rrs_inf(d)); % Calculate water-column corrected benthic reflectance (Traganos 2017 & Maritorena 1994)
+                        end
+                    end
+                end
             end
-%                                 for d = 1:5
-%                                     Rrs(j,k,d) = real(((Rrs_0(d)-rrs_inf(d))/exp(-2*Kd(1,d)*dp_sc))+rrs_inf(d)); % Calculate water-column corrected benthic reflectance (Traganos 2017 & Maritorena 1994)
-%                                 end
-                                
         else % For glint-free/low-glint images
-            Rrs(j,k,1:6) = Rrs(j,k,1:6)./(zeta + G.*Rrs(j,k,1:6)); % Convert above-surface Rrs to subsurface rrs (Kerr et al. 2018, Lee et al. 1998)
-            dp = real(log(1000*Rrs_0(2))/log(1000*Rrs_0(3))); % Calculate relative depth (Stumpf 2003 ratio transform)
-            if dp > 0 && dp < 2
-                Bathy(j,k) = dp;
-            else dp = 0;
+            for j = 1:szA(1)
+                for k = 1:szA(2)
+                    if isnan(Rrs(j,k,1)) == 0 && Rrs(j,k,8)<0.2
+                        Rrs_0(1:5) = Rrs(j,k,1:5)./(zeta + G.*Rrs(j,k,1:5)); % Convert above-surface Rrs to subsurface rrs (Kerr et al. 2018, Lee et al. 1998)
+                        b1 = 63.6; % Turning parameters (Kerr 2018 Table 6 average of 2 forward-modeling WorldView-2 results)
+                        b0 = -60.25;
+                        dp = b1*real(log(1000*Rrs_0(2))/log(1000*Rrs_0(3))) + b0; % Calculate depth (Stumpf 2003 ratio transform with Kerr et al. 2018 coefficients)
+                        if dp < 15 && dp > 0 % Parameters based on Kerr 2018 RMSE-based recommended constraints (depths greater than 15m inaccurate)
+                            Bathy(j,k) = dp;
+                        else dp = 0;
+                        end
+                        for d = 1:5
+                            Rrs(j,k,d) = real(((Rrs_0(d)-rrs_inf(d))/exp(-2*Kd(1,d)*dp))+rrs_inf(d)); % Calculate water-column corrected benthic reflectance (Traganos 2017 & Maritorena 1994)
+                        end
+                    end
+                end
             end
         end
-
-
-	elseif d_t == 2; % Execute Deglinting rrs, Bathymetery, and Decision Tree
+	elseif d_t == 2; % Only run for Deglinted Rrs and Bathymetry, not Decision Tree
 	    update = 'Running DT'
-      	    for j = 1:szA(1)
+	BS = 2;
+	WA = 3;
+	DG = 5;
+	MA = 6;
+	SC = 7;
+	FW = 10;
+	FU = 9;
+	UG = 8;
+	dev = 11;
+        p = 1;
+            for j = 1:szA(1)
                for k = 1:szA(2)
                    if isnan(Rrs(j,k,1)) == 0
-                       %% Mud, Developed and Sand
-                       if (Rrs(j,k,7) - Rrs(j,k,2))/(Rrs(j,k,7) + Rrs(j,k,2)) < 0.60 && Rrs(j,k,5) > Rrs(j,k,4) && Rrs(j,k,4) > Rrs(j,k,3)
-                            if Rrs(j,k,7) < Rrs(j,k,2) && Rrs(j,k,8) > Rrs(j,k,5)
-                                map(j,k) = 0; % Shadow
-                            elseif (Rrs(j,k,8) - Rrs(j,k,5))/(Rrs(j,k,8) + Rrs(j,k,5)) < 0.01 && Rrs(j,k,8) > 0.05 % Buildings & bright sand
-                                if BW(j,k) == 1
-                                    map(j,k) = 11; % Developed
-                                elseif sum(Rrs(j,k,6:8)) < avg_SD_sum
-                                    map(j,k) = 22; % Mud (intertidal?)
-                                else map(j,k) = 21; % Beach/sand/soil
-                                end
-                            elseif Rrs(j,k,5) > (Rrs(j,k,2)+((Rrs(j,k,7)-Rrs(j,k,2))/5)*2)
-                                map(j,k) = 21; % Beach/sand/soil
-                            elseif Rrs(j,k,5) < (((Rrs(j,k,7) - Rrs(j,k,2))/5)*3+Rrs(j,k,2))*0.60 && Rrs(j,k,7) > 0.2
-                                map(j,k) = 61; % Marsh grass
-                            else map(j,k) = 22; % Mud
-                            end
-                       elseif Rrs(j,k,2) > Rrs(j,k,3) && Rrs(j,k,7) > Rrs(j,k,3) && Rrs(j,k,2) < 0.1 && (Rrs(j,k,8) - Rrs(j,k,5))/(Rrs(j,k,8) + Rrs(j,k,5)) < 0.20|| Rrs(j,k,8) > 0.05 && Rrs(j,k,7) > Rrs(j,k,2) && (Rrs(j,k,8) - Rrs(j,k,5))/(Rrs(j,k,8) + Rrs(j,k,5)) < 0.1
-                           if BW(j,k) == 1
-                               map(j,k) = 11; % Shadow/Developed
-                           else map(j,k) = 22; % Mud
-                           end
+                       %% Cloud Cover
+		       if Cloud(j,k) == 1 && BW1(j,k) ~= 1
+                           map(j,k) = 1; % Cloud
                        %% Vegetation
-                       elseif (Rrs(j,k,8) - Rrs(j,k,5))/(Rrs(j,k,8) + Rrs(j,k,5)) > 0.20 && Rrs(j,k,7) > Rrs(j,k,3) % Vegetation pixels (NDVI)
-                           if Rrs(j,k,7) > Rrs(j,k,2) && ((Rrs(j,k,7) - Rrs(j,k,2))/(Rrs(j,k,7) + Rrs(j,k,2))) < 0.20 && (Rrs(j,k,7) - Rrs(j,k,8))/(Rrs(j,k,7) + Rrs(j,k,8)) > 0.01; % Shadowed-vegetation filter (B7/B8 ratio excludes marsh, which tends to have very similar values here)
-                               map(j,k) = 0; % Shadow
-                           elseif sum(Rrs(j,k,3:5)) < avg_veg_sum
-                                if ((Rrs(j,k,2) - Rrs(j,k,5))/(Rrs(j,k,2) + Rrs(j,k,5))) < 0.4% Agriculture filter based on elevated Blue band values
-                                    if Rrs(j,k,7) > 0.12 && sum(Rrs(j,k,7:8))/sum(Rrs(j,k,3:5)) > 2
-                                        map(j,k) = 63; % Forested Wetland
-                                    else map(j,k) = 61; % Dead vegetation or Marsh
+                       elseif (Rrs(j,k,7) - Rrs(j,k,5))/(Rrs(j,k,7) + Rrs(j,k,5)) > 0.20 && Rrs(j,k,7) > Rrs(j,k,3) % Vegetation pixels (NDVI)
+			    if ((Rrs(j,k,7) - Rrs(j,k,2))/(Rrs(j,k,7) + Rrs(j,k,2))) < 0.20 && (Rrs(j,k,7) - Rrs(j,k,8))/(Rrs(j,k,7) + Rrs(j,k,8)) > 0.01; % Shadowed-vegetation filter (B7/B8 ratio excludes marsh, which tends to have very similar values here)
+                            	map(j,k) = 0; % Shadow
+                            elseif sum(Rrs(j,k,3:5)) < avg_veg_sum
+                                if (Rrs(j,k,3) - Rrs(j,k,8))/(Rrs(j,k,3) + Rrs(j,k,8)) > -0.75 % ML
+                                    if (Rrs(j,k,7) - Rrs(j,k,5))/(Rrs(j,k,7) + Rrs(j,k,5)) > 0.75 % M
+	                                map(j,k) = FW; % Forested Wetland
+                                    elseif sum(Rrs(j,k,3:5)) > 0.12 && sum(Rrs(j,k,7:8)) > 0.45 % ML
+                                        map(j,k) = FU; % FORESTED UPLAND
+                                    elseif (Rrs(j,k,7) - Rrs(j,k,5))/(Rrs(j,k,7) + Rrs(j,k,5)) > 0.60
+                                        map(j,k) = FW; % Forested Wetland
+                                    elseif Rrs(j,k,7) < 0.3 && sum(Rrs(j,k,7:8)) > 0.25
+					if (Rrs(j,k,5) - Rrs(j,k,3))/(Rrs(j,k,5) + Rrs(j,k,3)) > 0.1
+						map(j,k) = DG; % Dead Grass
+					elseif Rrs(j,k,7) < 0.27 && sum(Rrs(j,k,7:8)) < 0.5
+						map(j,k) = MA; % Marsh
+					else map(j,k) = FU; % Forested Upland
+					end
                                     end
-                                else map(j,k) = 62; % Forested Upland (most likely agriculture)
+				elseif (Rrs(j,k,4) - Rrs(j,k,5))/(Rrs(j,k,4) + Rrs(j,k,5)) > 0.08
+					map(j,k) = 6; % Marsh (was algal flat)
+				else  map(j,k) = FU; % Forested Upland
                                 end
-                           elseif sum(Rrs(j,k,7:8)) < avg_mang_sum
-                               if ((Rrs(j,k,2) - Rrs(j,k,5))/(Rrs(j,k,2) + Rrs(j,k,5))) < 0.4% Agriculture filter based on elevated Blue band values
-                                   if Rrs(j,k,7) > 0.12 && sum(Rrs(j,k,7:8))/sum(Rrs(j,k,3:5)) > 2
-                                       map(j,k) = 63; % Forested Wetland
-                                   else map(j,k) = 61; % Marsh or Dead Vegetation
+			    elseif (Rrs(j,k,8) - Rrs(j,k,5))/(Rrs(j,k,8) + Rrs(j,k,5)) > 0.65
+				map(j,k) = FU; % Forested Upland
+                            elseif Rrs(j,k,7) < 0.4 % Marsh, Scrub, Grass, Dead Veg
+				if (Rrs(j,k,4) - Rrs(j,k,5))/(Rrs(j,k,4) + Rrs(j,k,5)) > 0.08
+					map(j,k) = 6; % Marsh (was algal flat)
+				elseif (Rrs(j,k,5) - Rrs(j,k,3))/(Rrs(j,k,5) + Rrs(j,k,3)) > 0.05 %&& Rrs(j,k,7) < 0.27 % Agriculture or senesced veg/grass
+					map(j,k) = DG; % Dead veg
+				else map(j,k) = UG; % Grass
+				end
+%			    elseif sum(Rrs(j,k,7:8)) < 0.8 && sum(Rrs(j,k,7:8)) > 0.65 % Live grass high, dead grass low
+%				map(j,k) = 10; % Upland Forest
+			    else map(j,k) = SC; % Scrub/shrub
+                            end
+                       %% Developed and Soil
+                       elseif (Rrs(j,k,7) - Rrs(j,k,2))/(Rrs(j,k,7) + Rrs(j,k,2)) < 0.60 && Rrs(j,k,5) > Rrs(j,k,4) && waterind(j,k) == 0 %Rrs(j,k,8) > 0.1 % && Rrs(j,k,4) > Rrs(j,k,3)
+                           if Rrs(j,k,5)/Rrs(j,k,7) > 0.7 && Rrs(j,k,5)/Rrs(j,k,7) < 1.1
+			       if BAI(j,k) == 0 && BW1(j,k) == 1 %BW4(j,k) == 1
+					map(j,k) = dev; %Developed. Was: BS; % Soil (fallow field)
+			       elseif BAI(j,k) == 1 && BW1(j,k) == 0
+					map(j,k) = BS; % Soil
+                               elseif BW1(j,k) == 1
+                                   if sum(Rrs(j,k,1:2))<0.35
+                                       if sum(Rrs(j,k,6:8)) < 0.85%avg_SD_sum
+                                           map(j,k) = dev; % Developed
+                                       else map(j,k) = BS; % Soil
+                                       end
+                                   elseif sum(Rrs(j,k,1:2)) > 0.6
+                                       map(j,k) = dev;
+				else map(j,k) = dev;
                                    end
-                                else map(j,k) = 62; % Forested Upland (most likely agriculture)
-                                end
-                           elseif (Rrs(j,k,8) - Rrs(j,k,5))/(Rrs(j,k,8) + Rrs(j,k,5)) > 0.65 % NDVI for high upland values
-                                map(j,k) = 62; % Upland Forest/Grass;
-                           elseif Rrs(j,k,5) > (((Rrs(j,k,7) - Rrs(j,k,2))/5)*3+Rrs(j,k,2))*0.60 && Rrs(j,k,7) < 0.2 % Difference of B5 from predicted B5 by slope of B7:B4 to distinguish marsh (old: live vs dead trees/grass/marsh)
-                               map(j,k) = 61; % Marsh grass
-                           elseif Rrs(j,k,7) < 0.12
-                               map(j,k) = 60; % Dead vegetation
-                           else
-                               map(j,k) = 62; % Upland Forest/Grass
+                               elseif sum(Rrs(j,k,6:8)) < avg_SD_sum
+                                   map(j,k) = dev;
+                               else map(j,k) = dev; % Developed
+                               end
+                           else map(j,k) = BS; % Soil
                            end
                        %% Water
                        elseif Rrs(j,k,8)<0.2 && Rrs(j,k,8)>0|| Rrs(j,k,8)<Rrs(j,k,7) && Rrs(j,k,6)<Rrs(j,k,7) && Rrs(j,k,6)<Rrs(j,k,5) && Rrs(j,k,4)<Rrs(j,k,5) && Rrs(j,k,4)<Rrs(j,k,3) && Rrs(j,k,8)>0 || Rrs(j,k,8)>Rrs(j,k,7) && Rrs(j,k,6)>Rrs(j,k,7) && Rrs(j,k,6)>Rrs(j,k,5) && Rrs(j,k,4)>Rrs(j,k,5) && Rrs(j,k,4)>Rrs(j,k,3) && Rrs(j,k,8)>0% Identify all water (glinted and glint-free)
-%                            map(j,k) = 5;
-
-                           if v > u*0.25
+                           if v > u*0.25 && u>0.1*num_pix
                                 % Deglint equation
                                 Rrs_deglint(1,1) = (Rrs(j,k,1) - (E_glint(1)*(Rrs(j,k,8) - mnNIR2)));
                                 Rrs_deglint(2,1) = (Rrs(j,k,2) - (E_glint(2)*(Rrs(j,k,7) - mnNIR1)));
@@ -478,120 +599,79 @@ Z = [met_in, matfiles2(z,1).name]; % Change location of XML files here
                                 Rrs_deglint(4,1) = (Rrs(j,k,4) - (E_glint(4)*(Rrs(j,k,8) - mnNIR2)));
                                 Rrs_deglint(5,1) = (Rrs(j,k,5) - (E_glint(5)*(Rrs(j,k,7) - mnNIR1)));
                                 Rrs_deglint(6,1) = (Rrs(j,k,6) - (E_glint(6)*(Rrs(j,k,8) - mnNIR2)));
-                                
+
                                 % Convert above-surface Rrs to below-surface rrs (Kerr et al. 2018)
-                                Rrs(j,k,1:6) = Rrs_deglint(1:6)./(zeta + G.*Rrs_deglint(1:6)); % Was Rrs_0=
-
+                                Rrs_0(1:5) = Rrs_deglint(1:5)./(zeta + G.*Rrs_deglint(1:5)); % Was Rrs_0=
                                 % Relative depth estimate
-                                dp = real(log(1000*Rrs_0(2))/log(1000*Rrs_0(3))); % Calculate relative depth (Stumpf 2003 ratio transform scaled to 1-10)
-                                if dp > 0 && dp < 2
+                                dp = m0*real(log(1000*Rrs_0(1))/log(1000*Rrs_0(3))) - m1; % Calculate depth (Stumpf 2003 ratio transform with Kerr et al. 2018 coefficients)
+
+                                if dp < 15 && dp > 0 % Parameters based on Kerr 2018 RMSE-based recommended constraints (depths greater than 15m inaccurate)
                                     Bathy(j,k) = dp;
                                 else dp = 0;
-                                end
-%                                 dp_sc = (dp-low)*scale_dp;
-                                
-%                                 for d = 1:5
-%                                     Rrs(j,k,d) = real(((Rrs_0(d)-rrs_inf(d))/exp(-2*Kd(1,d)*dp_sc))+rrs_inf(d)); % Calculate water-column corrected benthic reflectance (Traganos 2017 & Maritorena 1994)
-%                                 end
-                                
-                                %% DT
-                               if  Rrs(j,k,6) < Rrs(j,k,7) 
-                                   map(j,k) = 0; % Shadow
-                               elseif (Rrs(j,k,3) - Rrs(j,k,4))/(Rrs(j,k,3) + Rrs(j,k,4)) < 0.10 %(Rrs(j,k,2) - Rrs(j,k,4))/(Rrs(j,k,2)+Rrs(j,k,4)) < 0
-                                    if Rrs(j,k,4) > Rrs(j,k,3) || Rrs(j,k,5) > Rrs(j,k,3)
-                                        map(j,k) = 53; % Soft bottom
-                                    elseif sum(Rrs(j,k,3:5)) > avg_water_sum && (Rrs(j,k,5) - Rrs(j,k,2))/(Rrs(j,k,5) + Rrs(j,k,2)) > 0.1 % NEW from 0.05
-                                        map(j,k) = 52; % Soft bottom
-                                    elseif Rrs(j,k,4) > Rrs(j,k,2) && (Rrs(j,k,3) - Rrs(j,k,6))/(Rrs(j,k,3) + Rrs(j,k,6)) < 0.60 % Separate seagrass from dark water NEW
-                                        if (Rrs(j,k,3) - Rrs(j,k,5))/(Rrs(j,k,3) + Rrs(j,k,5)) > 0.10 % Separate seagrass from turbid water NEW
-                                            map(j,k) = 54; % Seagrass
-                                        else map(j,k) = 55; % Turbid water
-                                        end
-                                    else map(j,k) = 51; % Deep water
-                                    end
-                                else map(j,k) = 51; % Deep water
-                                end
-                                                                     
-                                    
-                            else % For glint-free/low-glint images
-                                Rrs(j,k,1:6) = Rrs(j,k,1:6)./(zeta + G.*Rrs(j,k,1:6)); % Convert above-surface Rrs to subsurface rrs (Kerr et al. 2018, Lee et al. 1998)
-                                dp = real(log(1000*Rrs_0(2))/log(1000*Rrs_0(3))); % Calculate relative depth (Stumpf 2003 ratio transform)
-                                if dp > 0 && dp < 2
-                                    Bathy(j,k) = dp;
-                                else dp = 0;
-                                end
-%                                 dp_sc = (dp-low)*scale_dp;
-                                
-%                                 for d = 1:5
-%                                     Rrs(j,k,d) = real(((Rrs_0(d)-rrs_inf(d))/exp(-2*Kd(1,d)*dp_sc))+rrs_inf(d)); % Calculate water-column corrected benthic reflectance (Traganos 2017 & Maritorena 1994)
-%                                 end
-                                %% DT
-                               if  Rrs(j,k,6) < Rrs(j,k,7) 
-                                   map(j,k) = 0; % Shadow
-                               elseif (Rrs(j,k,3) - Rrs(j,k,4))/(Rrs(j,k,3) + Rrs(j,k,4)) < 0.10 %(Rrs(j,k,2) - Rrs(j,k,4))/(Rrs(j,k,2)+Rrs(j,k,4)) < 0
-                                    if Rrs(j,k,4) > Rrs(j,k,3) || Rrs(j,k,5) > Rrs(j,k,3)
-                                        map(j,k) = 53; % Soft bottom
-                                    elseif sum(Rrs(j,k,3:5)) > avg_water_sum && (Rrs(j,k,5) - Rrs(j,k,2))/(Rrs(j,k,5) + Rrs(j,k,2)) > 0.1
-                                        map(j,k) = 52; % Soft bottom
-                                    elseif Rrs(j,k,4) > Rrs(j,k,2) && (Rrs(j,k,3) - Rrs(j,k,6))/(Rrs(j,k,3) + Rrs(j,k,6)) < 0.60 % Separate seagrass from dark water
-                                        if (Rrs(j,k,3) - Rrs(j,k,5))/(Rrs(j,k,3) + Rrs(j,k,5)) > 0.10 % Separate seagrass from turbid water
-                                            map(j,k) = 54; % Seagrass
-                                        else map(j,k) = 55; % Turbid water
-                                        end
-                                    else map(j,k) = 51; % Deep water
-                                    end
-                                else map(j,k) = 51; % Deep water
                                 end
 
+%                                    for d = 1:5
+%                                        Rrs(j,k,d) = real(((Rrs_0(d)-rrs_inf(d))/exp(-2*Kd(1,d)*dp))+rrs_inf(d)); % Calculate water-column corrected benthic reflectance (Traganos 2017 & Maritorena 1994)
+%                                    end
+
+                                    %% DT
+                                   if  Shadow(j,k) == 1 && max(Rrs(j,k,:)) == Rrs(j,k,2) % Max band3-6 = turbid/shallow water
+                                       map(j,k) = 0; % Shadow
+                                   else map(j,k) = WA; % Deep water
+                                   end
+                            else % For glint-free/low-glint images
+                                Rrs_0(1:5) = Rrs(j,k,1:5)./(zeta + G.*Rrs(j,k,1:5)); % Convert above-surface Rrs to subsurface rrs (Kerr et al. 2018, Lee et al. 1998)
+                                dp = m0*real(log(1000*Rrs_0(2))/log(1000*Rrs_0(3))) - m1; % Calculate depth (Stumpf 2003 ratio transform with Kerr et al. 2018 coefficients)
+                                if dp < 15 && dp > 0 % Parameters based on Kerr 2018 RMSE-based recommended constraints (depths greater than 15m inaccurate)
+                                    Bathy(j,k) = dp;
+                                else dp = 0;
+                                end
+                                   %% DT
+                                   if  Shadow(j,k) == 1  && max(Rrs(j,k,:)) == Rrs(j,k,2)  % Max band3-6 = turbid/shallow water
+                                       map(j,k) = 0; % Shadow/Unclassified
+                                   else map(j,k) = WA; % Deep water
+%                                    end
+                                   end
                              end % if v>u
                        end % If water/land
                    end % If isnan
                end % k
-%                 if j == szA(1)/4
-%                     update = 'DT 25% Complete'
-%                 end
-%                 if j == szA(1)/2
-%                     update = 'DT 50% Complete'
-%                 end
-%                 if j == szA(1)/4*3
-%                     update = 'DT 75% Complete'
-%                 end
-	        end % j
 
-%Classes:
-% 1 = Developed
-% 2 = Vegetation
-% 3 = Soil/sand/beach
-% 41 = Deep water
-% 42 = Benthic Sand
-% 43 = Benthic Seagrass
-% 44 = Benthic Coral
-% 45 = Benthic patch coral
+                end % j
+    end
+
 
 %%      DT Filter
-        if filter > 0
-                dt_filt = DT_Filter(map,filter,sz(1),sz(2));
-                AA = [loc_out,id,'_',loc,'_Map_filt_',num2str(filter),'_benthicnew'];
-                geotiffwrite(AA,dt_filt,R(1,1),'CoordRefSysCode',coor_sys);
-        else
-            Z1 = [loc_out,id,'_',loc,'_Map_benthicnew'];
-            geotiffwrite(Z1,map,R(1,1),'CoordRefSysCode',coor_sys);
-        end
+         if filter > 0
+                update = 'Filtering'
+                dt_filt = DT_Filter(map,filter,sz(1),sz(2),dev,FW,FU,UG,WA);
+                if cld_idx == 1
+                         AA = [loc_out,id,'_',loc,'_SOALCHI_filt_',num2str(filter),'_Cloudy'];
+                else AA = [loc_out,id,'_',loc,'_SOALCHI_filt_',num2str(filter)];
+                end
+                 geotiffwrite(AA,dt_filt,R(1,1),'CoordRefSysCode',coor_sys);
+         else
+             Z1 = [loc_out,id,'_',loc,'_Map_nofilt'];
+             geotiffwrite(Z1,map,R(1,1),'CoordRefSysCode',coor_sys);
+         end
 
+%         TP(z,1) = m0;
+%         TP(z,2) = m1;
+%         TP(z,3) = chla;
 
         %% Output images
-%          Z = [loc_out,id,'_',loc,'_Bathy1'];
-% 	     geotiffwrite(Z,Bathy,R(1,1),'CoordRefSysCode',coor_sys);
-	     Z2 = [loc_out,id,'_',loc,'_rrssub']; % last=52
-         geotiffwrite(Z2,Rrs,R(1,1),'CoordRefSysCode',coor_sys);
-% 
-    end % If dt = 1
+%         Z = [loc_out,id,'_',loc,'_Bathy_MAv1'];
+%             geotiffwrite(Z,Bathy,R(1,1),'CoordRefSysCode',coor_sys);
+
+%            Z2 = [Rrs_out,id,'_',loc,'_Rrs']; % last=52
+%          geotiffwrite(Z2,Rrs,R(1,1),'CoordRefSysCode',coor_sys);
+%
    end % If dt>0
+
+
+        wtime = toc;
+        time_min = wtime/60;
+        fprintf(1,'Matlab CPU time (minutes) = %f\n', time_min);
+
 end
-   
-
-	wtime = toc;
-	time_min = wtime/60;
-	fprintf(1,'Matlab CPU time (minutes) = %f\n', time_min);
-
 

@@ -1,0 +1,23 @@
+language: python
+services:
+  - docker
+python:
+  - "2.7"
+  - "3.4"
+  - "3.5"
+  - "3.6"
+  - "3.7"
+  - "3.8"
+  - "nightly"
+before_install:
+  - DOCKER_IMAGE=7yl4r/wv_img_proc_docker:0.0.1
+  - docker pull $DOCKER_IMAGE
+  - docker run -d $DOCKER_IMAGE
+  - docker ps -a
+  - docker run $DOCKER_IMAGE -v requirements.txt:/requirements.txt -v requirements_tests.txt:/requirements_tests.txt
+install:
+  - docker exec $DOCKER_IMAGE pip install -r /requirements.txt
+before_script:
+  - docker exec $DOCKER_IMAGE pip install -r /requirements_tests.txt
+script:
+  - docker exec $DOCKER_IMAGE pytest -v -m "not testdata_required"
