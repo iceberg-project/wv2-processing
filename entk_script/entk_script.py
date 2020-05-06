@@ -30,7 +30,7 @@ def generate_discover_pipeline(path):
     task = Task()
     task.name = 'Disc-T0'
     task.pre_exec = ['module load python2/2.7.11_gcc_np1.11',
-                     'source GulfCoastWorking/bin/activate',
+                     'source /pylon5/mc3bggp/paraskev/GulfCoastWorking/bin/activate',
                      'export PYTHONPATH=/pylon5/mc3bggp/paraskev/' +
                      'GulfCoastWorking/lib/python2.7/site-packages/osgeo/:' +
                      '/pylon5/mc3bggp/paraskev/GulfCoastWorking/lib/' +
@@ -61,7 +61,7 @@ def generate_pipeline(name, path, image, image_size):
         :device: Which GPU device will be used by this pipeline, int
     '''
     image_name = image.split('/')[-1].split('.')[0]
-
+    image_path = image.split('.')[0]
     # Create a Pipeline object
     entk_pipeline = Pipeline()
     entk_pipeline.name = name
@@ -72,7 +72,7 @@ def generate_pipeline(name, path, image, image_size):
     task0 = Task()
     task0.name = '%s-T0' % stage0.name
     task0.pre_exec = ['module load python2/2.7.11_gcc_np1.11',
-                      'source GulfCoastWorking/bin/activate',
+                      'source /pylon5/mc3bggp/paraskev/GulfCoastWorking/bin/activate',
                       'export PYTHONPATH=/pylon5/mc3bggp/paraskev/' +
                       'GulfCoastWorking/lib/python2.7/site-packages/osgeo/:' +
                       '/pylon5/mc3bggp/paraskev/GulfCoastWorking/lib/' +
@@ -82,10 +82,11 @@ def generate_pipeline(name, path, image, image_size):
     task0.arguments = ["pgc_ortho.py", '-p', 4326, '-c', 'ns', '-t', 'UInt16',
                        '-f', 'GTiff', '--no_pyramids', image,
                        "$NODE_LFS_PATH/%s" % task0.name] 
-    task0.upload_input_data = [os.path.abspath('../lib/__init__.py' + '> lib/__init__.py'),
+    task0.upload_input_data = [os.path.abspath('../pgc_duplication/pgc_ortho.py') + '> pgc_ortho.py')
+                               os.path.abspath('../lib/__init__.py') + '> lib/__init__.py'),
                                os.path.abspath('../lib/mosaic.py') + '> lib/mosaic.py',
                                os.path.abspath('../lib/orto_utils.py') + '> lib/orto_utils.py']
-    task0.link_input_data = [image]
+    task0.link_input_data = [image_path + '.ntf', image_path + '.xml']
     task0.cpu_reqs = {'processes': 1, 'threads_per_process': 1,
                       'process_type': None, 'thread_type': 'OpenMP'}
     task0.lfs_per_process = int(image_size)
@@ -104,14 +105,13 @@ def generate_pipeline(name, path, image, image_size):
     # Assign arguments for the task executable
     task1.arguments = ["-nodisplay", "-nodesktop", "-singleCompThread", "-r",
                        "WV_Processing('$NODE_LFS_PATH/%s/%s_u16ns4326.tif'," +
-                       "'%s', '%s/%s.xml', 'EPSG:4326' , '2', '3','NSF_CETX'," +
+                       "'%s', '%s.xml', 'EPSG:4326' , '2', '3','NSF_CETX'," +
                        "1, './','./');exit" % (task0.name, image_name, 
                                                image_name, path, image_name)]
-    task1.link_input_data = ['$SHARED/unet_weights.hdf5 >' +
-                             'weights/unet_weights.hdf5']
     task1.upload_input_data = [os.path.abspath('../wv_classify/DT_Filter.m'),
                                os.path.abspath('../wv_classify/wv_classify.m') +
                                '> WV_Processing.m']
+    task1.link_input_data = [image_path + '.xml']
     task1.cpu_reqs = {'processes': 4, 'threads_per_process': 1,
                       'process_type': None, 'thread_type': 'OpenMP'}
     task1.tag = task0.name

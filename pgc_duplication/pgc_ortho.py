@@ -49,7 +49,7 @@ def main():
         parser.error("Arg1 is not a recognized file path or file type: %s" % (src))
 
     if not os.path.isdir(dstdir):
-        parser.error("Error arg2 is not a valid file path: %s" % dstdir)
+        os.mkdir(dstdir)
 
     #### Verify EPSG
     try:
